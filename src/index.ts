@@ -1,9 +1,11 @@
 import { eq } from "drizzle-orm";
-import { Todo } from "..";
+import { Action, Message, Todo } from "..";
 import { db } from "../db";
 import { usersTable } from "../db/schema";
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import { HumanMessage } from "@langchain/core/messages";
+import readlinesyns from "readline-sync";
+
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -33,6 +35,13 @@ async function searchTodo(t: number) {
 async function deleteTodo(t: number) {
     await db.delete(usersTable).where(eq(usersTable.id, t));
 }
+
+const tools = {
+    getAllTodos: getAllTodos,
+    createTodo: createTodo,
+    searchTodo: searchTodo,
+    deleteTodo: deleteTodo,
+};
 
 const SYSTEM_PROMPT = `
 
@@ -68,22 +77,143 @@ const SYSTEM_PROMPT = `
     {"type": "output", "output": "Your todo has been created successfully" }
 `;
 
-async function generate() {
-    const model = new ChatGoogleGenerativeAI({
-        model: "gemini-2.0-flash",
-        maxOutputTokens: 50,
-        apiKey: process.env.GEMINI_API_KEY,
-    });
+const messages: Message[] = [
+    {
+        role: "system",
+        content: SYSTEM_PROMPT,
+    },
+];
 
-    const response = await model.invoke([
-        [
-            "system",
-            "You are a helpful assistant that translates English to French. Translate the user sentence.",
-        ],
-        ["human", "I love programming."],
-    ]);
+// async function main() {
+//     while (true) {
+//         const query = readlinesyns.question(">> ");
+//         const userMessage = {
+//             type: "user",
+//             user: query,
+//         };
+//         messages.push({ role: "user", content: JSON.stringify(userMessage) });
 
-    console.log(response.content);
+//         while (true) {
+//             const model = new ChatGoogleGenerativeAI({
+//                 model: "gemini-2.0-flash",
+//                 maxOutputTokens: 50,
+//                 apiKey: process.env.GEMINI_API_KEY,
+//             });
+//             const response = await model.invoke(messages);
+
+//             const result = response.content;
+//             messages.push({ role: "assistant", content: result });
+
+//             try {
+//                 const action = JSON.parse(result) as Action;
+//                 if (action.type === "output") {
+//                     console.log(`bot: ${action.output}`);
+//                     break;
+//                 } else if (action.type === "think") {
+//                     console.log(`[thinking]: ${action.thought}`);
+//                     // Continue the loop to get the final output after thinking
+//                 } else {
+//                     console.log("Received unknown action type. Retrying...");
+//                     // Remove the last message to retry
+//                     messages.pop();
+//                     break;
+//                 }
+//             } catch (error) {
+//                 console.error("Failed to parse response as JSON:", error);
+//                 console.log("Raw response:", result);
+//                 // Remove the last message to retry
+//                 messages.pop();
+//                 break;
+//             }
+//         }
+//     }
+// }
+
+async function main() {
+    while (true) {
+        const query = readlinesyns.question(">> ");
+
+        if (query.toLowerCase() === "exit" || query.toLowerCase() === "quit") {
+            console.log("Goodbye!");
+            break;
+        }
+
+        const userMessage = {
+            type: "user",
+            user: query,
+        };
+
+        messages.push({ role: "user", content: JSON.stringify(userMessage) });
+
+        while (true) {
+            try {
+                const model = new ChatGoogleGenerativeAI({
+                    model: "gemini-2.0-flash",
+                    maxOutputTokens: 50,
+                    apiKey: process.env.GEMINI_API_KEY,
+                });
+
+                const langChainMessages = messages.map((msg) => ({
+                    role: msg.role,
+                    content: msg.content,
+                }));
+
+                const response = await model.invoke(langChainMessages);
+
+                let resultText = "";
+                if (typeof response.content === "string") {
+                    resultText = response.content;
+                } else if (Array.isArray(response.content)) {
+                    resultText = response.content
+                        .map((item) => {
+                            if (typeof item === "string") return item;
+                            if (item.type === "text") return item.text;
+                            return "";
+                        })
+                        .join("");
+                }
+
+                messages.push({ role: "assistant", content: resultText });
+
+                try {
+                    const action = JSON.parse(resultText) as Action;
+
+                    if (action.type === "output") {
+                        console.log(`bot: ${action.output}`);
+                        break;
+                    } else if (action.type === "action") {
+                        const fn = tools?.[action.input]
+                        const observation = fn(action.input);
+                        const observationMsg = {
+                            type: "observation",
+                            observation: observation,
+                        };
+
+                        messages.push({
+                            role: "developer",
+                            content: JSON.stringify(observationMsg),
+                        });
+                    } else {
+                        console.log(
+                            "Received unknown action type. Retrying..."
+                        );
+                        messages.pop();
+                        break;
+                    }
+                } catch (parseError) {
+                    console.error(
+                        "Failed to parse response as JSON:",
+                        parseError
+                    );
+                    console.log("Raw response:", resultText);
+                    messages.pop();
+                    break;
+                }
+            } catch (apiError) {
+                console.error("API error:", apiError);
+                break;
+            }
+        }
+    }
 }
-
-generate();
+main();

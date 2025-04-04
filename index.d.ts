@@ -5,4 +5,12 @@ export interface Todo {
     email: string;
     todo: string;
 }
+export interface Message {
+    role: string;
+    content: string;
+}
 
+interface OutputAction {
+    type: string;
+    output: string;
+}
