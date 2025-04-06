@@ -4,9 +4,12 @@ import { usersTable } from "../db/schema";
 import readlinesyns from "readline-sync";
 import OpenAI from "openai";
 import dotenv from "dotenv";
-import { Todo } from "..";
+import { Message, Todo } from "..";
+import { error } from "console";
+import { ChatCompletionMessageParam } from "openai/resources/chat";
 
 dotenv.config();
+const client = new OpenAI();
 
 async function getAllTodos() {
     const todos = db.select().from(usersTable);
@@ -17,9 +20,6 @@ async function createTodo(todo: Todo) {
     const [todoId] = await db
         .insert(usersTable)
         .values({
-            name: todo.name,
-            age: todo.age,
-            email: todo.email,
             todo: todo.todo,
         })
         .returning({ id: usersTable.id });
@@ -33,13 +33,6 @@ async function searchTodo(t: number) {
 async function deleteTodo(t: number) {
     await db.delete(usersTable).where(eq(usersTable.id, t));
 }
-
-const tools = {
-    getAllTodos: getAllTodos,
-    createTodo: createTodo,
-    searchTodo: searchTodo,
-    deleteTodo: deleteTodo,
-};
 
 const SYSTEM_PROMPT = `
 
@@ -75,32 +68,60 @@ const SYSTEM_PROMPT = `
     {"type": "output", "output": "Your todo has been created successfully" }
 `;
 
-// const messages = [
-//     {
-//         role: "system",
-//         content: SYSTEM_PROMPT,
-//     },
-//     {
-//         role: "user",
-//         content: "you are an helpful assistant",
-//     },
-// ];
+const message: ChatCompletionMessageParam[] = [
+    {
+        role: "system",
+        content: SYSTEM_PROMPT,
+    },
+];
 
-const client = new OpenAI();
+const tools = {
+    getAllTodos: getAllTodos,
+    createTodo: createTodo,
+    searchTodo: searchTodo,
+    deleteTodo: deleteTodo,
+};
 
 async function main() {
-    const completion = await client.chat.completions.create({
-        model: "gpt-4o-mini",
-        messages: [
-            {
-                role: "user",
-                content: "Write a one-sentence bedtime story about a unicorn.",
-            },
-        ],
-        max_tokens: 30,
-    });
+    while (true) {
+        const q = readlinesyns.question(">> ");
+        const userMsg = {
+            type: "user",
+            content: q,
+        };
+        message.push({ role: "user", content: JSON.stringify(userMsg) });
 
-    console.log(completion.choices[0].message.content);
+        while (true) {
+            const chat = await client.chat.completions.create({
+                model: "gpt-4o-mini",
+                messages: message,
+            });
+            const result = chat.choices[0].message.content;
+            if (!result) {
+                throw error("Please check your result");
+            }
+            message.push({ role: "assistant", content: result });
+
+            const action = JSON.parse(result);
+            if (action.type === "output") {
+                console.log(`🤖: ${action.output}`);
+                break;
+            } else if (action.type === "action") {
+                const fn = tools[action.function as keyof typeof tools];
+                if (!fn) throw error("Please make a function");
+
+                const observation = await fn(action.input);
+                const observationMsg = {
+                    type: "observation",
+                    observation: observation,
+                };
+                message.push({
+                    role: "system",
+                    content: JSON.stringify(observationMsg),
+                });
+            }
+        }
+    }
 }
 
 main();

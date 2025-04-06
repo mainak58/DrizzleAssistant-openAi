@@ -12,6 +12,12 @@ interface OutputAction {
 }
 
 export interface Message {
-    role: string;
+    role: "system" | "user" | "assistant" | "function";
     content: string;
+    name?: string;
 }
+
+export type ToolKeys = keyof typeof tools;
+export type Action = {
+    function: ToolKeys;
+};
