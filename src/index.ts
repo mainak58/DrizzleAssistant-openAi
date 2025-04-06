@@ -1,12 +1,10 @@
 import { eq } from "drizzle-orm";
 import { db } from "../db";
 import { usersTable } from "../db/schema";
-import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
-import { HumanMessage } from "@langchain/core/messages";
 import readlinesyns from "readline-sync";
-
+import OpenAI from "openai";
 import dotenv from "dotenv";
-import { Message, Todo } from "..";
+import { Todo } from "..";
 
 dotenv.config();
 
@@ -77,9 +75,32 @@ const SYSTEM_PROMPT = `
     {"type": "output", "output": "Your todo has been created successfully" }
 `;
 
-const messages: Message[] = [
-    {
-        role: "system",
-        content: SYSTEM_PROMPT,
-    },
-];
+// const messages = [
+//     {
+//         role: "system",
+//         content: SYSTEM_PROMPT,
+//     },
+//     {
+//         role: "user",
+//         content: "you are an helpful assistant",
+//     },
+// ];
+
+const client = new OpenAI();
+
+async function main() {
+    const completion = await client.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [
+            {
+                role: "user",
+                content: "Write a one-sentence bedtime story about a unicorn.",
+            },
+        ],
+        max_tokens: 30,
+    });
+
+    console.log(completion.choices[0].message.content);
+}
+
+main();
